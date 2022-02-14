@@ -13,6 +13,7 @@ int** cells = NULL;
 int** pressures = NULL;
 int** checkedCells = NULL;
 // CheckedCells:
+// -3 = Updating above fluid first
 // -2 = Floating fluid
 // -1 = Nonfluid cell
 // 0 = Nonchecked cell
@@ -56,7 +57,7 @@ void redrawPressures() {
         for (int c = 0; c < gridX; c++) {
             char ch;
             if (pressures[r][c] < 10) ch = ((char) pressures[r][c]) + '0';
-            //else ch = ((char) (pressures[r][c]-10) + 'A');
+            else ch = ((char) (pressures[r][c]-10) + 'A');
             waddch(pressurew, ch);
         }
     }
@@ -79,6 +80,17 @@ int minPressure;
 // Assume current cell has not been checked and is FLUID
 // Sets pressure for current cell and checks it
 void updatePressuresDFS(int r, int c) {
+    // Handle any surface water updates first
+    if (r < gridY-1 && checkedCells[r+1][c] == -3) {
+        checkedCells[r+1][c] = 0;
+
+        if (r > 0 && cells[r-1][c] == FLUID) {
+            checkedCells[r][c] = -3;
+            updatePressuresDFS(r-1, c);
+            return;
+        }
+    }
+
     checkedCells[r][c] = currWaterCnt;
 
     // Update cell pressure precedence: bottom, top, right, left
@@ -96,20 +108,27 @@ void updatePressuresDFS(int r, int c) {
                 && (r == gridY-1 || cells[r+1][c-1] == SOLID))
         {
             pressures[r][c] = pressures[r][c-1];
+        } else if (r > 0 && cells[r-1][c] == FLUID) {
+            // Grounded water without above water updated first.
+            // Uncheck this water and update top water first, then come back.
+            checkedCells[r][c] = -3;
+            updatePressuresDFS(r-1, c);
+            return;
         }
-    }
+    } 
     
-    if (pressures[r][c] < minPressure) minPressure = pressures[r][c];
+    if (pressures[r][c] < minPressure) 
+        minPressure = pressures[r][c];
 
-    // Check bottom depth then right, left, and up
-    if (r < gridY-1 && !checkedCells[r+1][c] && cells[r+1][c] == FLUID)
-        updatePressuresDFS(r+1, c);
+    // Check depths: right, left, up, and down
     if (c < gridX-1 && !checkedCells[r][c+1] && cells[r][c+1] == FLUID)
         updatePressuresDFS(r, c+1);
     if (c > 0 && !checkedCells[r][c-1] && cells[r][c-1] == FLUID)
         updatePressuresDFS(r, c-1);
     if (r > 0 && !checkedCells[r-1][c] && cells[r-1][c] == FLUID)
         updatePressuresDFS(r-1, c);
+    if (r < gridY-1 && !checkedCells[r+1][c] && cells[r+1][c] == FLUID)
+        updatePressuresDFS(r+1, c);
 }
 
 // Add absolute value of minPressure to all current body of water
@@ -127,19 +146,25 @@ void updatePressures() {
     clearPressures();
     clearCheckedCells();
     currWaterCnt = 1;
-    
-    // DFS every body of water
+
+    // First pass, 0 pressure everything above air
     for (int r = 0; r < gridY; r++) {
         for (int c = 0; c < gridX; c++) {
             if (!checkedCells[r][c] && cells[r][c] == AIR) {
-                // First pass, 0 pressure everything above air
                 checkedCells[r][c] = -1;
                 for (int rr = r-1; rr >= 0; rr--) {
                     if (cells[rr][c] == FLUID) checkedCells[rr][c] = -2;
                     else checkedCells[rr][c] = -1;
                     pressures[rr][c] = 0;
                 }
-            } else if (!checkedCells[r][c] && cells[r][c] == FLUID) {
+            }
+        }
+    }
+    
+    // DFS every body of water
+    for (int r = 0; r < gridY; r++) {
+        for (int c = 0; c < gridX; c++) {
+            if (!checkedCells[r][c] && cells[r][c] == FLUID) {
                 minPressure = 0;
 
                 // Second pass (preliminary pressure update for current water)
@@ -210,7 +235,7 @@ int main(int argc, char* argv[]) {
     srand((unsigned) time(&t));
 
     initscr(); noecho(); 
-    nodelay(stdscr, TRUE);
+    //nodelay(stdscr, TRUE);
     box(stdscr, 0, 0); refresh();
 
     gridY = 40;
