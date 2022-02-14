@@ -19,7 +19,7 @@ BucketQueue* createBucketQueue(int nmBucketsMax, int bucketSizeMax) {
 }
 
 // Inserts an entry with priority to bq if unique.
-// Returns 0 if bad priority, duplicate found, or no more space. 1 otherwise.
+// Returns 0 if bad priority, or no more space. 1 otherwise.
 int bucketQueueInsert(void* e, int priority, 
                       BucketQueue* bq, int(*cmp)(void*,void*)) 
 {
@@ -27,12 +27,6 @@ int bucketQueueInsert(void* e, int priority,
         bq->bucketLens[priority] >= bq->bucketSizeMax) 
     {
         return 0;
-    }
-
-    for (int i = 0; i < bq->bucketLens[priority]; i++) {
-        if (!cmp(e, bq->buckets[priority][i])) {
-            return 0;
-        }
     }
 
     bq->buckets[priority][bq->bucketLens[priority]++] = e;
