@@ -80,42 +80,30 @@ int minPressure;
 // Assume current cell has not been checked and is FLUID
 // Sets pressure for current cell and checks it
 void updatePressuresDFS(int r, int c) {
-    // Handle any surface water updates first
+    // handle surface updates first
     if (r < gridY-1 && checkedCells[r+1][c] == -3) {
         checkedCells[r+1][c] = 0;
-
-        if (r > 0 && cells[r-1][c] == FLUID) {
-            checkedCells[r][c] = -3;
-            updatePressuresDFS(r-1, c);
-            return;
-        }
     }
-
     checkedCells[r][c] = currWaterCnt;
 
-    // Update cell pressure precedence: bottom, top, right, left
-    // For right and left, the water must be grounded
+    // Update cell pressure precedence: bottom, top, left, right
     if (r < gridY-1 && checkedCells[r+1][c] == currWaterCnt) {
         pressures[r][c] = pressures[r+1][c]-1;
     } else if (r > 0 && checkedCells[r-1][c] == currWaterCnt) {
         pressures[r][c] = pressures[r-1][c]+1;
-    } else if (r == gridY-1 || cells[r+1][c] == SOLID) {
-        if (c < gridX-1 && checkedCells[r][c+1] == currWaterCnt 
-            && (r == gridY-1 || cells[r+1][c+1] == SOLID))
-        {
-            pressures[r][c] = pressures[r][c+1];
-        } else if (c > 0 && checkedCells[r][c-1] == currWaterCnt 
-                && (r == gridY-1 || cells[r+1][c-1] == SOLID))
-        {
+    } else if (r == 0 || cells[r-1][c] == SOLID) {
+        // if there is a ceiling, then use pressure of left or right
+        if (c > 0 && checkedCells[r][c-1] == currWaterCnt) {
             pressures[r][c] = pressures[r][c-1];
-        } else if (r > 0 && cells[r-1][c] == FLUID) {
-            // Grounded water without above water updated first.
-            // Uncheck this water and update top water first, then come back.
-            checkedCells[r][c] = -3;
-            updatePressuresDFS(r-1, c);
-            return;
+        } else if (c < gridX - 1 && checkedCells[r][c+1] == currWaterCnt) {
+            pressures[r][c] = pressures[r][c+1];
         }
-    } 
+    } else if (r > 0 && !checkedCells[r-1][c] && cells[r-1][c] == FLUID) {
+        // do surface update if above water is not checked 
+        checkedCells[r][c] = -3;
+        updatePressuresDFS(r-1, c);
+        return;
+    }
     
     if (pressures[r][c] < minPressure) 
         minPressure = pressures[r][c];
