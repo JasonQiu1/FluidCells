@@ -15,7 +15,6 @@ int** cells = NULL;
 int** pressures = NULL;
 int** checkedCells = NULL;
 // CheckedCells:
-// -3 = Updating above fluid first
 // -2 = Floating fluid
 // -1 = Nonfluid cell
 // 0 = Nonchecked cell
@@ -92,7 +91,8 @@ void redrawPressures() {
     for (int r = 0; r < gridY; r++) {
         for (int c = 0; c < gridX; c++) {
             char ch;
-            if (pressures[r][c] < 10) ch = ((char) pressures[r][c]) + '0';
+            if (pressures[r][c] == -1) ch = '.';
+            else if (pressures[r][c] < 10) ch = ((char) pressures[r][c]) + '0';
             else ch = ((char) (pressures[r][c]-10) + 'A');
             waddch(pressurew, ch);
         }
@@ -167,9 +167,13 @@ void updateAllPressures() {
             if (!checkedCells[r][c] && cells[r][c] == AIR) {
                 checkedCells[r][c] = -1;
                 for (int rr = r-1; rr >= 0; rr--) {
-                    if (cells[rr][c] == FLUID) checkedCells[rr][c] = -2;
-                    else checkedCells[rr][c] = -1;
-                    pressures[rr][c] = 0;
+                    if (cells[rr][c] == FLUID) {
+                        checkedCells[rr][c] = -2;
+                        pressures[rr][c] = -1;
+                    } else {
+                        checkedCells[rr][c] = -1;
+                        pressures[rr][c] = 0;
+                    }
                 }
             }
         }
@@ -195,8 +199,9 @@ void updateAllPressures() {
                     balancePressures(-minPressure);
                 }
                 currWaterCnt++;
-            } else {
+            } else if (cells[r][c] != FLUID) {
                 checkedCells[r][c] = -1;
+                pressures[r][c] = -1;
             }
         }
     }
@@ -206,9 +211,9 @@ void step() {
     updateAllPressures();
     int r, c, direction;
     for (r = gridY-1; r >= 0; r--) {
-        direction = rand() % 2;
-        //direction = r % 2;
-        for ((direction) ? (c = 0) : (c = gridX-1); (direction) ? c < gridX-1 : c >= 0; (direction) ? c++ : c--) {
+        //direction = rand() % 2;
+        direction = r % 2;
+        for ((direction) ? (c = 0) : (c = gridX-1); (direction) ? c < gridX : c >= 0; (direction) ? c++ : c--) {
             switch(cells[r][c]) {
                 case SOLID:
                     break;
@@ -217,9 +222,25 @@ void step() {
                         // Check below for air
                         cells[r+1][c] = FLUID;
                         cells[r][c] = AIR;
-                    } else if (r > 0 && cells[r-1][c] == AIR && pressures[r][c] >= 2) {
-                        // TODO
-                        // Siphon pressure 0 water to surface pressure >= 2 water.
+                    } else if (r > 0 && cells[r-1][c] == AIR && pressures[r][c] >= 1) {
+                        // Siphon pressure 0 water to 
+                        // surface pressure >= 2 water from same body of water
+                        for (int rr = 0; rr < r; rr++) {
+                            for (int cc = 0; cc < gridX; cc++) {
+                                if (checkedCells[rr][cc] == checkedCells[r][c] 
+                                    && pressures[rr][cc] == 0)
+                                {
+                                    cells[rr][cc] = AIR;
+                                    checkedCells[rr][cc] = 0;
+                                    cells[r-1][c] = FLUID;
+                                    checkedCells[r-1][c] = checkedCells[r][c];
+                                    pressures[r-1][c] = pressures[r][c]-1;
+
+                                    rr = r;
+                                    break;
+                                }
+                            }
+                        }
                     } else if (c > 0 && cells[r][c-1] == AIR) {
                         // Check left for air
                         if (r < gridY-1 && cells[r+1][c-1] == AIR) {
@@ -255,7 +276,7 @@ int main(int argc, char* argv[]) {
     srand((unsigned) time(&t));
 
     initscr(); noecho(); 
-    nodelay(stdscr, TRUE);
+    nodelay(stdscr, TRUE); // Change this to FALSE for interactive stepping.
     box(stdscr, 0, 0); refresh();
 
     gridY = 40;
@@ -275,7 +296,7 @@ int main(int argc, char* argv[]) {
                 cells[r][c] = SOLID;
             } else if (r > (gridY / 10) && r < (gridY / 4 * 3) && c > gridX / 2 && c < gridX / 4 * 3) {
                 cells[r][c] = AIR;
-            } else if (r > 5 && r < (gridY / 4 * 3) && c > gridX / 4 && c < gridX / 4 * 4) {
+            } else if (r > 10 && r < (gridY / 4 * 3) && c > gridX / 4 && c < gridX / 4 * 3) {
                 cells[r][c] = FLUID;
             } else if (r < (gridY / 3)) {
                 cells[r][c] = AIR;
