@@ -6,6 +6,8 @@
 
 #include "msleep.h"
 
+#include "bucketqueue.h"
+
 int gridY = -1, gridX = -1;
 WINDOW* cellw = NULL;
 WINDOW* pressurew = NULL;
@@ -19,11 +21,45 @@ int** checkedCells = NULL;
 // 0 = Nonchecked cell
 // n = nth connected body of water (currWaterCnt)
 
+// Bucket queue setup for pressures
+typedef struct Cell {
+    int r;
+    int c;
+} Cell;
+
+Cell* createCell(int r, int c) {
+    Cell* newC = malloc(sizeof *newC);
+    newC->r = r;
+    newC->c = c;
+    return newC;
+}
+
+void delCell(Cell* c) {
+    free(c);
+}
+
+int cellCmp(void* a, void* b) {
+    return (((Cell*)a)->r - ((Cell*)b)->r) +
+           (((Cell*)a)->c - ((Cell*)b)->c);
+}
+
+enum DirPriority {
+    RIGHT = 0,
+    LEFT,
+    UP,
+    DOWN,
+    DIRPRIORITYMAX
+};
+
+BucketQueue* pressureQueue = NULL;
+// end BQ setup
+
 typedef enum CellType {
     AIR = 0,
     SOLID,
     FLUID
 } CellType;
+
 
 void redrawCells() {
     werase(cellw); 
@@ -79,44 +115,34 @@ int currWaterCnt;
 int minPressure;
 // Assume current cell has not been checked and is FLUID
 // Sets pressure for current cell and checks it
-void updatePressuresDFS(int r, int c) {
-    // handle surface updates first
-    if (r < gridY-1 && checkedCells[r+1][c] == -3) {
-        checkedCells[r+1][c] = 0;
-    }
+void updatePressure(int r, int c) {
+    if (checkedCells[r][c]) return;
     checkedCells[r][c] = currWaterCnt;
 
-    // Update cell pressure precedence: bottom, top, left, right
+    // Update cell pressure -- precedence: down, up, left, right
     if (r < gridY-1 && checkedCells[r+1][c] == currWaterCnt) {
         pressures[r][c] = pressures[r+1][c]-1;
     } else if (r > 0 && checkedCells[r-1][c] == currWaterCnt) {
         pressures[r][c] = pressures[r-1][c]+1;
-    } else if (r == 0 || cells[r-1][c] == SOLID) {
-        // if there is a ceiling, then use pressure of left or right
-        if (c > 0 && checkedCells[r][c-1] == currWaterCnt) {
-            pressures[r][c] = pressures[r][c-1];
-        } else if (c < gridX - 1 && checkedCells[r][c+1] == currWaterCnt) {
-            pressures[r][c] = pressures[r][c+1];
-        }
-    } else if (r > 0 && !checkedCells[r-1][c] && cells[r-1][c] == FLUID) {
-        // do surface update if above water is not checked 
-        checkedCells[r][c] = -3;
-        updatePressuresDFS(r-1, c);
-        return;
+    } else if (c > 0 && checkedCells[r][c-1] == currWaterCnt) {
+        pressures[r][c] = pressures[r][c-1];
+    } else if (c < gridX - 1 && checkedCells[r][c+1] == currWaterCnt) {
+        pressures[r][c] = pressures[r][c+1];
     }
     
+    // Update min pressure (for balancing later)
     if (pressures[r][c] < minPressure) 
         minPressure = pressures[r][c];
 
-    // Check depths: right, left, up, and down
+    // Add neighbors to queue: right, left, up, down
     if (c < gridX-1 && !checkedCells[r][c+1] && cells[r][c+1] == FLUID)
-        updatePressuresDFS(r, c+1);
+        bucketQueueInsert(createCell(r, c+1), RIGHT, pressureQueue, &cellCmp);
     if (c > 0 && !checkedCells[r][c-1] && cells[r][c-1] == FLUID)
-        updatePressuresDFS(r, c-1);
+        bucketQueueInsert(createCell(r, c-1), LEFT, pressureQueue, &cellCmp);
     if (r > 0 && !checkedCells[r-1][c] && cells[r-1][c] == FLUID)
-        updatePressuresDFS(r-1, c);
+        bucketQueueInsert(createCell(r-1, c), DOWN, pressureQueue, &cellCmp);
     if (r < gridY-1 && !checkedCells[r+1][c] && cells[r+1][c] == FLUID)
-        updatePressuresDFS(r+1, c);
+        bucketQueueInsert(createCell(r+1, c), UP, pressureQueue, &cellCmp);
 }
 
 // Add absolute value of minPressure to all current body of water
@@ -130,7 +156,7 @@ void balancePressures(int num) {
     }
 }
 
-void updatePressures() {
+void updateAllPressures() {
     clearPressures();
     clearCheckedCells();
     currWaterCnt = 1;
@@ -149,14 +175,20 @@ void updatePressures() {
         }
     }
     
-    // DFS every body of water
+    // Update pressures for each body of water
     for (int r = 0; r < gridY; r++) {
         for (int c = 0; c < gridX; c++) {
             if (!checkedCells[r][c] && cells[r][c] == FLUID) {
                 minPressure = 0;
 
                 // Second pass (preliminary pressure update for current water)
-                updatePressuresDFS(r, c);
+                bucketQueueInsert(createCell(r, c), RIGHT, 
+                                  pressureQueue, &cellCmp);
+                Cell* next;
+                while ((next = (Cell*)bucketQueueExtractMin(pressureQueue))) {
+                    updatePressure(next->r, next->c);
+                    delCell(next);
+                }
 
                 // Third pass (balance negative pressure in current water)
                 if (minPressure < 0) {
@@ -171,11 +203,12 @@ void updatePressures() {
 }
 
 void step() {
-    updatePressures();
-    int r, c, randint;
+    updateAllPressures();
+    int r, c, direction;
     for (r = gridY-1; r >= 0; r--) {
-        randint = rand() % 2;
-        for ((randint) ? (c = 0) : (c = gridX-1); (randint) ? c < gridX-1 : c >= 0; (randint) ? c++ : c--) {
+        direction = rand() % 2;
+        //direction = r % 2;
+        for ((direction) ? (c = 0) : (c = gridX-1); (direction) ? c < gridX-1 : c >= 0; (direction) ? c++ : c--) {
             switch(cells[r][c]) {
                 case SOLID:
                     break;
@@ -184,10 +217,9 @@ void step() {
                         // Check below for air
                         cells[r+1][c] = FLUID;
                         cells[r][c] = AIR;
-                    } else if (r > 0 && cells[r-1][c] == AIR && pressures[r][c] > 0) {
-                        // TODO:
-                        // If pressure is more than it should be, siphon surface
-                        // water that belongs to the same body of water
+                    } else if (r > 0 && cells[r-1][c] == AIR && pressures[r][c] >= 2) {
+                        // TODO
+                        // Siphon pressure 0 water to surface pressure >= 2 water.
                     } else if (c > 0 && cells[r][c-1] == AIR) {
                         // Check left for air
                         if (r < gridY-1 && cells[r+1][c-1] == AIR) {
@@ -223,7 +255,7 @@ int main(int argc, char* argv[]) {
     srand((unsigned) time(&t));
 
     initscr(); noecho(); 
-    //nodelay(stdscr, TRUE);
+    nodelay(stdscr, TRUE);
     box(stdscr, 0, 0); refresh();
 
     gridY = 40;
@@ -243,7 +275,7 @@ int main(int argc, char* argv[]) {
                 cells[r][c] = SOLID;
             } else if (r > (gridY / 10) && r < (gridY / 4 * 3) && c > gridX / 2 && c < gridX / 4 * 3) {
                 cells[r][c] = AIR;
-            } else if (r > 0 && r < (gridY / 4 * 3) && c > gridX / 4 && c < gridX / 4 * 3) {
+            } else if (r > 5 && r < (gridY / 4 * 3) && c > gridX / 4 && c < gridX / 4 * 4) {
                 cells[r][c] = FLUID;
             } else if (r < (gridY / 3)) {
                 cells[r][c] = AIR;
@@ -253,6 +285,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    pressureQueue = createBucketQueue(DIRPRIORITYMAX, gridY * gridX);
+
     char ch;
     while(ch != 'q') {
         redrawCells();
@@ -261,9 +295,10 @@ int main(int argc, char* argv[]) {
         wrefresh(cellw);
         wrefresh(pressurew);
         ch = getch();
-        msleep(10);
+        msleep(20);
     }
 
     endwin(); 
+    delBucketQueue(pressureQueue);
     return 0;
 }

@@ -9,6 +9,7 @@ BucketQueue* createBucketQueue(int nmBucketsMax, int bucketSizeMax) {
     newBQ->buckets = malloc(nmBucketsMax * sizeof *newBQ->buckets); 
 
     newBQ->bucketSizeMax = bucketSizeMax;
+    newBQ->bucketLens = malloc(bucketSizeMax * sizeof *newBQ->bucketLens);
     for (int i = 0; i < nmBucketsMax; i++) {
         newBQ->buckets[i] = malloc(bucketSizeMax * sizeof **newBQ->buckets);
         newBQ->bucketLens[i] = 0;
@@ -43,7 +44,7 @@ int bucketQueueInsert(void* e, int priority,
 void* bucketQueueExtractMin(BucketQueue* bq) {
     for (int i = 0; i < bq->nmBucketsMax; i++) {
         if (bq->bucketLens[i] > 0) {
-            return bq->buckets[i][bq->bucketLens[i]--];
+            return bq->buckets[i][--bq->bucketLens[i]];
         }
     }
     return NULL;

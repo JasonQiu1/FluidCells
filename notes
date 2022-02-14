@@ -1,0 +1,1 @@
+Change pressure updating to a unique priority queue BFS (implemented as bucket queue), in order of right, left, up, down.
