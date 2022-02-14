@@ -1,8 +1,7 @@
-#include <ncurses.h>
+#include <ncurses.h> 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "msleep.h"
 
@@ -19,6 +18,9 @@ int** checkedCells = NULL;
 // -1 = Nonfluid cell
 // 0 = Nonchecked cell
 // n = nth connected body of water (currWaterCnt)
+int evenFrame = 0;
+int currWaterCnt = 0;
+int minPressure = 0;
 
 // Bucket queue setup for pressures
 typedef struct Cell {
@@ -68,16 +70,16 @@ void redrawCells() {
         for (int c = 0; c < gridX; c++) {
             switch(cells[r][c]) {
                 case SOLID:
-                    waddch(cellw, ACS_CKBOARD);
+                    waddch(cellw, '#');
                     break;
                 case FLUID:
                     wattron(cellw, A_DIM);
-                    waddch(cellw, ACS_CKBOARD); 
+                    waddch(cellw, 'v'); 
                     wattroff(cellw, A_DIM);
                     break;
                 case AIR:
                 default:
-                    waddch(cellw, ACS_BULLET);
+                    waddch(cellw, '.');
                     break;
             }
         }
@@ -111,8 +113,6 @@ void clearPressures() {
     }
 }
 
-int currWaterCnt;
-int minPressure;
 // Assume current cell has not been checked and is FLUID
 // Sets pressure for current cell and checks it
 void updatePressure(int r, int c) {
@@ -167,7 +167,9 @@ void updateAllPressures() {
             if (!checkedCells[r][c] && cells[r][c] == AIR) {
                 checkedCells[r][c] = -1;
                 for (int rr = r-1; rr >= 0; rr--) {
-                    if (cells[rr][c] == FLUID) {
+                    if (cells[rr][c] == SOLID) {
+                        break;
+                    } else if (cells[rr][c] == FLUID) {
                         checkedCells[rr][c] = -2;
                         pressures[rr][c] = -1;
                     } else {
@@ -198,6 +200,7 @@ void updateAllPressures() {
                 if (minPressure < 0) {
                     balancePressures(-minPressure);
                 }
+
                 currWaterCnt++;
             } else if (cells[r][c] != FLUID) {
                 checkedCells[r][c] = -1;
@@ -211,8 +214,9 @@ void step() {
     updateAllPressures();
     int r, c, direction;
     for (r = gridY-1; r >= 0; r--) {
-        //direction = rand() % 2;
-        direction = r % 2;
+        direction = r % 2 ^ evenFrame; // determinstic simulation that flips
+                                       // which side to start on based on row
+                                       // and frame number
         for ((direction) ? (c = 0) : (c = gridX-1); (direction) ? c < gridX : c >= 0; (direction) ? c++ : c--) {
             switch(cells[r][c]) {
                 case SOLID:
@@ -225,6 +229,10 @@ void step() {
                     } else if (r > 0 && cells[r-1][c] == AIR && pressures[r][c] >= 1) {
                         // Siphon pressure 0 water to 
                         // surface pressure >= 2 water from same body of water
+                        // TODO: Limit water siphoned per body of water based
+                        // on pressure and opening size
+                        // Note: can optimize by keeping track of 0
+                        // pressure surface water cells for each body of water
                         for (int rr = 0; rr < r; rr++) {
                             for (int cc = 0; cc < gridX; cc++) {
                                 if (checkedCells[rr][cc] == checkedCells[r][c] 
@@ -272,39 +280,41 @@ void step() {
 }
 
 int main(int argc, char* argv[]) {
-    time_t t;
-    srand((unsigned) time(&t));
-
-    initscr(); noecho(); 
-    nodelay(stdscr, TRUE); // Change this to FALSE for interactive stepping.
-    box(stdscr, 0, 0); refresh();
-
-    gridY = 40;
-    gridX = gridY * 2;
-    cellw = newwin(gridY, gridX, 1, 1);
-    pressurew = newwin(gridY, gridX, 1, gridX + 2);
+    // Initialize map
+    FILE* fpMap = fopen("./map", "r");
+    if (!fpMap) { 
+        fprintf(stderr, "Map not found!\n");
+        return -1;
+    }
+    fscanf(fpMap, "%i %i\n", &gridY, &gridX);
+    fprintf(stderr, "Map size: %ix%i\n", gridY, gridX);
 
     cells = malloc(gridY * sizeof *cells);
     pressures = malloc(gridY * sizeof *pressures);
     checkedCells = malloc(gridY * sizeof *checkedCells);
+    char* line = malloc(gridX * sizeof *line + 2);
     for (int r = 0; r < gridY; r++) {
         cells[r] = malloc(gridX * sizeof **cells);
         pressures[r] = malloc(gridX * sizeof **cells);
         checkedCells[r] = malloc(gridX * sizeof **checkedCells);
+        if (!fgets(line, gridX+2, fpMap)) {
+            fprintf(stderr, "Error reading map input!\n");
+            return -1;
+        }
         for (int c = 0; c < gridX; c++) {
-            if (r > (gridY / 5) && r < (gridY / 7 * 5 + 3) && c > gridX / 3 && c < gridX / 3 * 2) {
-                cells[r][c] = SOLID;
-            } else if (r > (gridY / 10) && r < (gridY / 4 * 3) && c > gridX / 2 && c < gridX / 4 * 3) {
-                cells[r][c] = AIR;
-            } else if (r > 10 && r < (gridY / 4 * 3) && c > gridX / 4 && c < gridX / 4 * 3) {
-                cells[r][c] = FLUID;
-            } else if (r < (gridY / 3)) {
-                cells[r][c] = AIR;
-            } else {
-                cells[r][c] = SOLID;
-            }
+            cells[r][c] = line[c] - '0';
         }
     }
+    free(line);
+    fclose(fpMap);
+
+    // Initialize ncurses
+    initscr(); noecho(); 
+    nodelay(stdscr, TRUE); // Change this to FALSE for interactive stepping.
+    box(stdscr, 0, 0); refresh();
+
+    cellw = newwin(gridY, gridX, 1, 1);
+    pressurew = newwin(gridY, gridX, 1, gridX+2);
 
     pressureQueue = createBucketQueue(DIRPRIORITYMAX, gridY * gridX);
 
@@ -316,7 +326,8 @@ int main(int argc, char* argv[]) {
         wrefresh(cellw);
         wrefresh(pressurew);
         ch = getch();
-        msleep(20);
+        evenFrame ^= 1;
+        msleep(50);
     }
 
     endwin(); 
