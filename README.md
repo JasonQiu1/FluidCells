@@ -1,5 +1,5 @@
 # Fluid Cells
-[![asciicast](https://asciinema.org/a/QIWoz5yjDxWyf8igaXYQM6Osb.svg)](https://asciinema.org/a/QIWoz5yjDxWyf8igaXYQM6Osb)
+[![asciicast](https://asciinema.org/a/EBtZJEoXWW0EIQi6H28NKMWQ2.svg)](https://asciinema.org/a/EBtZJEoXWW0EIQi6H28NKMWQ2)
 A cellular automata sim for incompressible fluids built with an ncurses display.
 
 Supports fast pressure equalization for multiple bodies of water.
@@ -12,7 +12,9 @@ Supports fast pressure equalization for multiple bodies of water.
 `make` or compile manually.
 
 ## Run
-`./fluidcells map` in root directory.
+Open up a terminal in fullscreen and run `./fluidcells map` in the root directory.
+
+If parts of the map are cutting out, then try decreasing your terminal's font size with Ctrl+- until you can see the entire display.
 
 You can swap out `map` with one of the maps in the root directory (e.g. `map2`, `map3`, etc.) or make your own.
 
