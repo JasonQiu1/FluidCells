@@ -43,3 +43,8 @@ The digits currently supported are:
 2: Fluid
 
 Take a look at the example maps in the repo and run them to get a better idea!
+
+## Current limitations
+- Max flow is calculated for an entire body of water rather than for each section of water going through a pipe.
+- Max flow does not take into account width of vertical pipes
+- Cannot siphon multiple sections of water evenly at the same time while using the unified siphon limit
