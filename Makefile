@@ -30,7 +30,7 @@ clean:
 	@rm $(BINARYDIR)/$(BINARYNAME) || true
 
 run:
-	$(BINARYDIR)/$(BINARYNAME)
+	$(BINARYDIR)/$(BINARYNAME) map
 
 debug:
 	/usr/bin/gdb --tty=/dev/pty1 $(BINARYDIR)/$(BINARYNAME)
