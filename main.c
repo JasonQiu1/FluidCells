@@ -8,20 +8,28 @@
 #include "bucketqueue.h"
 
 int gridY = -1, gridX = -1;
-WINDOW* cellw = NULL;
-WINDOW* pressurew = NULL;
+
+typedef enum CellType {
+    AIR = 0,
+    SOLID,
+    FLUID
+} CellType;
 int** cells = NULL;
-int** pressures = NULL;
+
 int** checkedCells = NULL;
 // CheckedCells:
 // -2 = Floating fluid
 // -1 = Nonfluid cell
 // 0 = Nonchecked cell
 // n = nth connected body of water (waterBodyID)
+int** pressures = NULL;
 int waterBodyID = 0;
 int* maxFlow;
 int* currFlow;
 int minPressure = 0;
+
+WINDOW* cellw = NULL;
+WINDOW* pressurew = NULL;
 
 // Bucket queue setup for pressures
 typedef struct Cell {
@@ -56,13 +64,7 @@ enum DirPriority {
 BucketQueue* pressureQueue = NULL;
 // end BQ setup
 
-typedef enum CellType {
-    AIR = 0,
-    SOLID,
-    FLUID
-} CellType;
-
-
+// Draws the cells on the ncurses window
 void redrawCells() {
     werase(cellw); 
     wmove(cellw, 0,0);
@@ -87,6 +89,7 @@ void redrawCells() {
     }
 }
 
+// Draws the pressures on the pressure ncurses window
 void redrawPressures() {
     werase(pressurew); 
     wmove(pressurew, 0,0);
@@ -118,8 +121,7 @@ void clearFlow() {
     memset(currFlow, 0, gridX * gridY / 2 * sizeof *currFlow);
 }
 
-// Assume current cell has not been checked and is FLUID
-// Sets pressure for current cell and checks it
+// Updates pressure for a particular cell and adds valid neighbors to the queue.
 void updatePressure(int r, int c) {
     if (checkedCells[r][c]) return;
     checkedCells[r][c] = waterBodyID;
@@ -150,7 +152,7 @@ void updatePressure(int r, int c) {
         bucketQueueInsert(createCell(r+1, c), UP, pressureQueue, &cellCmp);
 }
 
-// Add absolute value of minPressure to all current body of water
+// Add num to all pressures in current body of water
 void balancePressures(int num) {
     for (int r = 0; r < gridY; r++) {
         for (int c = 0; c < gridX; c++) {
@@ -161,24 +163,13 @@ void balancePressures(int num) {
     }
 }
 
-// Return 1 if there is neighboring air, and 0 otherwise;
-int neighboringAir(int r, int c) {
-    if (   (r < gridY-1 && cells[r+1][c] == AIR)
-        || (r > 0 && cells[r-1][c] == AIR)
-        || (c > 0 && cells[r][c-1] == AIR)
-        || (c < gridX-1 && cells[r][c+1] == AIR))
-    {
-        return 1;
-    }
-    return 0;
-}
-
+// Runs multiple passes through the grid to update pressures and related structs
 void updateAllPressures() {
     clearPressures();
     clearCheckedCells();
     waterBodyID = 1;
 
-    // First pass, 0 pressure everything above air
+    // First pass, 0 pressure everything above air until a solid cell
     for (int r = 0; r < gridY; r++) {
         for (int c = 0; c < gridX; c++) {
             if (!checkedCells[r][c] && cells[r][c] == AIR) {
@@ -198,7 +189,7 @@ void updateAllPressures() {
         }
     }
     
-    // Update pressures for each body of water
+    // Finds each body of water and updates their water cells
     for (int r = 0; r < gridY; r++) {
         for (int c = 0; c < gridX; c++) {
             if (!checkedCells[r][c] && cells[r][c] == FLUID) {
@@ -214,28 +205,48 @@ void updateAllPressures() {
                 }
 
                 // Third pass (balance negative pressure in current water)
+                // This is for when water is higher on the right in a body
                 if (minPressure < 0) {
                     balancePressures(-minPressure);
                 }
 
                 // Fourth pass (find max flow of current water)
-                // in current water, find the minimum section of vertical water
-                // that is not surrounded by air
+                // In current water, find the minimum section of vertical water
+                // that is in a horizontal "pipe"
+                // A "pipe" is a column of water cells sandwiched by solid cells
+                // This is for limiting siphoning to be a bit more realistic.
+                // It won't be correct for a body of water siphoning through
+                // different size "pipes" at the same exact frame, and does not
+                // take into account vertical pipes, but it's good enough
                 maxFlow[waterBodyID] = gridY;
                 int flow;
+                int pipeStart = 0;
                 for (int cc = 0; cc < gridX; cc++) {
-                    flow = 0;
                     for (int rr = 0; rr < gridY; rr++) {
-                        if (cells[rr][cc] != FLUID || neighboringAir(rr, cc)) {
-                            if (flow > 0 && flow < maxFlow[waterBodyID]) {
-                                maxFlow[waterBodyID] = flow;
+                        if (!pipeStart && cells[rr][cc] == SOLID) {
+                            // start of pipe
+                            pipeStart = 1; 
+                            flow = 0;
+                        } else if (pipeStart) {
+                            if (cells[rr][cc] != FLUID) {
+                                // end of "pipe", if actually a pipe, then
+                                // try updating maxflow
+                                if (cells[rr][cc] == AIR) {
+                                    pipeStart = 0;
+                                }
+
+                                if (cells[rr][cc] == SOLID && flow > 0 
+                                    && flow < maxFlow[waterBodyID]) 
+                                {
+                                    maxFlow[waterBodyID] = flow;
+                                }
+                            } else {
+                                flow++;
                             }
-                            flow = 0; 
-                        } else {
-                            flow++;
-                        }
+                        }                     
                     }
-                    if (flow > 0 && flow < maxFlow[waterBodyID]) {
+                    // treat bottom of map as solid
+                    if (pipeStart && flow > 0 && flow < maxFlow[waterBodyID]) {
                         maxFlow[waterBodyID] = flow;
                     }
                 }
@@ -249,9 +260,11 @@ void updateAllPressures() {
     }
 }
 
+// Does 1 step for the cellular automata.
 void step() {
     updateAllPressures();
     clearFlow();
+
     int r, c, direction;
     for (r = gridY-1; r >= 0; r--) {
         direction = (r & 1); // deterministic simulation that flips
@@ -259,10 +272,12 @@ void step() {
         for ((direction) ? (c = 0) : (c = gridX-1); 
                 (direction) ? c < gridX : c >= 0; (direction) ? c++ : c--) 
         {
-            if (pressures[r][c] == -1) continue;
+            if (pressures[r][c] == -1) continue; // skip siphoned cells
+                                                 // I think the sim should work
+                                                 // without this, but bugs pop
+                                                 // up when I don't use it
+            // Switch case in case I add more mobile cells in the future
             switch(cells[r][c]) {
-                case SOLID:
-                    break;
                 case FLUID:
                     if (r < gridY-1 && cells[r+1][c] == AIR) {
                         // Check below for air
@@ -325,6 +340,7 @@ void step() {
                         }
                     }
                     break;
+                case SOLID:
                 case AIR:
                 default:
                     break;
@@ -339,7 +355,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // Initialize map
+    // Initialize map and related structures
     FILE* fpMap = fopen(argv[1], "r");
     if (!fpMap) { 
         fprintf(stderr, "Map not found!\n");
@@ -375,12 +391,13 @@ int main(int argc, char* argv[]) {
     cellw = newwin(gridY, gridX, 1, 1);
     pressurew = newwin(gridY, gridX, 1, gridX+2);
 
-    // init pressure structures
+    // Initialize pressure structures
     // TODO should be able to optimize space better
     pressureQueue = createBucketQueue(DIRPRIORITYMAX, gridY * gridX);
     maxFlow = malloc(gridX * gridY / 2 * sizeof *maxFlow);
     currFlow = calloc(gridX * gridY / 2, sizeof *maxFlow);
 
+    // Main loop
     char ch;
     while(ch != 'q') {
         redrawCells();
@@ -389,9 +406,10 @@ int main(int argc, char* argv[]) {
         wrefresh(cellw);
         wrefresh(pressurew);
         ch = getch();
-        msleep(50);
+        msleep(25); // Change the timestep if you want it to go faster/slower.
     }
 
+    // TODO: free everything
     endwin(); 
     delBucketQueue(pressureQueue);
     return 0;
